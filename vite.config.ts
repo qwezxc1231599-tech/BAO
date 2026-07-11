@@ -4,6 +4,7 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const env = loadEnv(mode, '.', '');
   return {
     base: '/BAO/',
     plugins: [react(), tailwindcss()],
