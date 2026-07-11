@@ -1,0 +1,6 @@
+{
+  "name": "商品推廣導購網",
+  "description": "整理各類熱銷商品的推廣與分潤連結，提供分類、搜尋與排序功能，方便快速找到合適商品。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
