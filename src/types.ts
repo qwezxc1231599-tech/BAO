@@ -1,6 +1,7 @@
 export type Category = 
   | '全部'
   | '我的最愛'
+  | '降價追蹤'
   | '3C與家電' 
   | '服飾與鞋包' 
   | '美妝與保健' 
@@ -20,4 +21,5 @@ export interface Product {
   affiliateLink: string;
   category: Category;
   imageUrl?: string | null;
+  priceHistory?: { date: string; price: number }[];
 }

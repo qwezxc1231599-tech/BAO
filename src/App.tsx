@@ -4,7 +4,7 @@
  */
 
 import { useState, useMemo, useEffect } from 'react';
-import { Search, SlidersHorizontal, Video, Globe, Share2, Facebook, Link as LinkIcon, ChevronLeft, ArrowUp, ChevronDown, X } from 'lucide-react';
+import { Search, SlidersHorizontal, Video, Globe, Share2, Facebook, Link as LinkIcon, ChevronLeft, ArrowUp, ChevronDown, X, Bell, Megaphone, Flame, Sparkles, Ticket } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { products } from './data';
 import { ProductCard } from './components/ProductCard';
@@ -12,15 +12,27 @@ import { AdCarousel } from './components/AdCarousel';
 import { VideoGeneratorModal } from './components/VideoGeneratorModal';
 import { RecentlyViewed } from './components/RecentlyViewed';
 import { RecommendedProducts } from './components/RecommendedProducts';
-import { Category } from './types';
+import { PriceAlertModal } from './components/PriceAlertModal';
+import { PriceAlertsListModal } from './components/PriceAlertsListModal';
+import { PriceAlertRecommendations } from './components/PriceAlertRecommendations';
+import { PromotionKitModal } from './components/PromotionKitModal';
+import { FloatingCompareBar } from './components/FloatingCompareBar';
+import { CompareModal } from './components/CompareModal';
+import { NoticeBanner } from './components/NoticeBanner';
+import { CouponSection } from './components/CouponSection';
+import { useCompare } from './CompareContext';
+import { Category, Product } from './types';
 import { useCurrency, Currency } from './CurrencyContext';
 import { useFavorites } from './FavoritesContext';
+import { usePriceAlerts } from './PriceAlertContext';
 import { useLanguage, LANGUAGES, Language } from './LanguageContext';
 import { useRecentlyViewed } from './useRecentlyViewed';
+import { getProductPriceHistory } from './utils/priceHistory';
 
 const CATEGORIES: Category[] = [
   '全部',
   '我的最愛',
+  '降價追蹤',
   '3C與家電',
   '服飾與鞋包',
   '美妝與保健',
@@ -30,7 +42,9 @@ const CATEGORIES: Category[] = [
   '其他',
 ];
 
-type SortOption = 'default' | 'price_asc' | 'price_desc' | 'sales_desc';
+const HOT_SEARCH_TAGS = ['底片相機', '免運', '理然', '托特包', '棒球外套', '包包'];
+
+type SortOption = 'default' | 'price_asc' | 'price_desc' | 'sales_desc' | 'lowest_ever' | 'discount_desc';
 
 const FloatingAds = () => {
   return (
@@ -73,11 +87,19 @@ export default function App() {
   const [maxPrice, setMaxPrice] = useState<number>(10000);
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Price alert modals state
+  const [selectedAlertProduct, setSelectedAlertProduct] = useState<Product | null>(null);
+  const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
+  const [isAlertsListOpen, setIsAlertsListOpen] = useState(false);
+  const [isPromoModalOpen, setIsPromoModalOpen] = useState(false);
   
+  const { isCompareModalOpen, setIsCompareModalOpen } = useCompare();
   const { currency, setCurrency, isLoading } = useCurrency();
   const { favorites } = useFavorites();
+  const { hasAlert, totalAlerts } = usePriceAlerts();
   const { language, setLanguage, t, getCategoryTranslation } = useLanguage();
-  const { history, addViewedProduct, clearHistory } = useRecentlyViewed();
+  const { history, recentCategories, addViewedProduct, addViewedCategory, clearHistory } = useRecentlyViewed();
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -103,6 +125,8 @@ export default function App() {
     // Filter by Category
     if (activeCategory === '我的最愛') {
       result = result.filter((p) => favorites.includes(p.id));
+    } else if (activeCategory === '降價追蹤') {
+      result = result.filter((p) => hasAlert(p.id));
     } else if (activeCategory !== '全部') {
       result = result.filter((p) => p.category === activeCategory);
     }
@@ -131,6 +155,19 @@ export default function App() {
       case 'sales_desc':
         result.sort((a, b) => b.salesNum - a.salesNum);
         break;
+      case 'lowest_ever':
+        result.sort((a, b) => {
+          const aIsLow = getProductPriceHistory(a).isLowestEver ? 1 : 0;
+          const bIsLow = getProductPriceHistory(b).isLowestEver ? 1 : 0;
+          if (bIsLow !== aIsLow) return bIsLow - aIsLow;
+          return getProductPriceHistory(b).discountFromMaxPercent - getProductPriceHistory(a).discountFromMaxPercent;
+        });
+        break;
+      case 'discount_desc':
+        result.sort((a, b) => {
+          return getProductPriceHistory(b).discountFromMaxPercent - getProductPriceHistory(a).discountFromMaxPercent;
+        });
+        break;
       case 'default':
       default:
         // Keep original order
@@ -138,69 +175,145 @@ export default function App() {
     }
 
     return result;
-  }, [searchQuery, activeCategory, sortOption, maxPrice, favorites]);
+  }, [searchQuery, activeCategory, sortOption, maxPrice, favorites, hasAlert]);
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans">
       {/* Mobile Search Modal */}
       {isMobileSearchOpen && (
-        <div className="fixed inset-0 z-50 bg-white">
-          <div className="flex flex-col h-full">
-            <div className="flex items-center p-4 border-b border-gray-200 gap-3">
-              <button 
-                onClick={() => setIsMobileSearchOpen(false)}
-                className="p-2 text-gray-500 hover:text-gray-700"
-              >
-                <ChevronLeft className="h-6 w-6" />
-              </button>
-              <div className="flex-1 flex rounded-sm overflow-hidden bg-[#f5f5f5]">
-                <input
-                  type="text"
-                  placeholder={t('searchPlaceholder')}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  autoFocus
-                  className="block w-full pl-4 pr-3 py-2.5 leading-5 bg-transparent placeholder-gray-500 text-black focus:outline-none focus:ring-0 sm:text-sm font-medium"
-                />
+        <div className="fixed inset-0 z-50 bg-white flex flex-col">
+          <div className="flex items-center p-4 border-b border-gray-200 gap-3">
+            <button 
+              onClick={() => setIsMobileSearchOpen(false)}
+              className="p-2 text-gray-500 hover:text-gray-700"
+            >
+              <ChevronLeft className="h-6 w-6" />
+            </button>
+            <div className="flex-1 flex rounded-lg overflow-hidden bg-gray-100 border border-gray-200 focus-within:border-black">
+              <input
+                type="text"
+                placeholder={t('searchPlaceholder')}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                autoFocus
+                className="block w-full pl-3 pr-2 py-2.5 leading-5 bg-transparent placeholder-gray-400 text-black focus:outline-none focus:ring-0 sm:text-sm font-medium"
+              />
+              {searchQuery && (
                 <button
                   type="button"
-                  onClick={() => setIsMobileSearchOpen(false)}
-                  className="flex items-center justify-center px-5 bg-black hover:bg-gray-800 transition-colors"
+                  onClick={() => setSearchQuery('')}
+                  className="px-2 text-gray-400 hover:text-black"
                 >
-                  <Search className="h-5 w-5 text-white" />
+                  <X className="w-4 h-4" />
                 </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsMobileSearchOpen(false)}
+                className="flex items-center justify-center px-4 bg-black hover:bg-gray-800 transition-colors"
+              >
+                <Search className="h-4 w-4 text-white" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-6">
+            {/* Hot Tags */}
+            <div>
+              <h3 className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-1 uppercase tracking-wider">
+                <Flame className="w-3.5 h-3.5 text-amber-500 fill-current" />
+                <span>熱門搜尋</span>
+              </h3>
+              <div className="flex flex-wrap gap-1.5">
+                {HOT_SEARCH_TAGS.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery(tag);
+                      setIsMobileSearchOpen(false);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-xs font-medium text-gray-700 hover:bg-amber-50 hover:border-amber-300 transition-colors"
+                  >
+                    #{tag}
+                  </button>
+                ))}
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
-               <div className="mb-4">
-                 <h3 className="text-sm font-bold text-gray-700 mb-3">熱門分類</h3>
-                 <div className="flex flex-wrap gap-2">
-                   {CATEGORIES.map(category => (
-                     <button
-                       key={category}
-                       onClick={() => {
-                         setActiveCategory(category);
-                         setIsMobileSearchOpen(false);
-                       }}
-                       className={`px-4 py-2 rounded-sm text-sm font-bold uppercase transition-colors ${
-                         activeCategory === category
-                           ? 'bg-black text-white border border-black'
-                           : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-black'
-                       }`}
-                     >
-                       {getCategoryTranslation(category)}
-                     </button>
-                   ))}
-                 </div>
-               </div>
+
+            {/* Popular Categories */}
+            <div>
+              <h3 className="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">熱門分類</h3>
+              <div className="flex flex-wrap gap-2">
+                {CATEGORIES.map(category => (
+                  <button
+                    key={category}
+                    onClick={() => {
+                      setActiveCategory(category);
+                      setIsMobileSearchOpen(false);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-colors ${
+                      activeCategory === category
+                        ? 'bg-black text-white'
+                        : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-100'
+                    }`}
+                  >
+                    {getCategoryTranslation(category)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Mobile Currency & Language Options */}
+            <div className="pt-4 border-t border-gray-200 space-y-4">
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">顯示幣別</h3>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['TWD', 'USD', 'JPY'] as Currency[]).map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setCurrency(c)}
+                      className={`py-2 text-xs font-bold rounded-lg border transition-all ${
+                        currency === c
+                          ? 'bg-black text-white border-black shadow-sm'
+                          : 'bg-white border-gray-200 text-gray-700'
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">選擇語言</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {LANGUAGES.map((lang) => (
+                    <button
+                      key={lang.code}
+                      onClick={() => setLanguage(lang.code)}
+                      className={`py-2 px-3 text-xs font-bold rounded-lg border text-left transition-all ${
+                        language === lang.code
+                          ? 'bg-black text-white border-black shadow-sm'
+                          : 'bg-white border-gray-200 text-gray-700'
+                      }`}
+                    >
+                      {lang.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
 
+      {/* Top Announcement Bar */}
+      <NoticeBanner onQuickFilterLowest={() => setSortOption('lowest_ever')} />
+
       {/* Header */}
-      <header className="sticky top-0 z-10 bg-white border-b border-gray-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+      <header className="sticky top-0 z-10 bg-white/95 backdrop-blur-md border-b border-gray-100 shadow-2xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 sm:py-4">
           <div className="flex items-center justify-between gap-6">
             <div className="flex-shrink-0 flex items-center gap-3">
               <button 
@@ -209,129 +322,201 @@ export default function App() {
                   setActiveCategory('全部');
                   setSortOption('default');
                 }}
-                className="hover:opacity-80 transition-opacity focus:outline-none flex items-center"
+                className="hover:opacity-80 transition-opacity focus:outline-none flex items-center gap-2 text-left"
               >
-                <h1 className="text-3xl font-black tracking-widest text-black uppercase">
-                  FASHION
-                </h1>
+                <div>
+                  <h1 className="text-2xl sm:text-3xl font-black tracking-wider text-black">
+                    寶寶分享站
+                  </h1>
+                  <span className="text-[10px] text-gray-400 font-medium block -mt-1 hidden sm:block">
+                    嚴選好物與限時特惠指南
+                  </span>
+                </div>
               </button>
             </div>
-            <div className="hidden md:flex flex-1 max-w-2xl w-full items-center justify-end gap-6">
-              <div className="flex-1 flex rounded-sm overflow-hidden bg-[#f5f5f5] border border-transparent focus-within:border-gray-300 transition-colors">
-                <input
-                  type="text"
-                  placeholder={t('searchPlaceholder')}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="block w-full pl-4 pr-3 py-2.5 leading-5 bg-transparent placeholder-gray-500 text-black focus:outline-none focus:ring-0 sm:text-sm font-medium"
-                />
-                <button
-                  type="button"
-                  className="flex items-center justify-center px-6 bg-black hover:bg-gray-800 transition-colors"
-                >
-                  <Search className="h-5 w-5 text-white" />
-                </button>
-              </div>
-              
-              <div className="hidden sm:flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 shrink-0 relative">
-                  {(['TWD', 'USD', 'JPY'] as Currency[]).map((c) => (
+
+            <div className="hidden md:flex flex-1 max-w-2xl w-full flex-col gap-1.5 items-end">
+              <div className="w-full flex items-center justify-end gap-3">
+                <div className="flex-1 flex rounded-lg overflow-hidden bg-gray-100 border border-transparent focus-within:border-black focus-within:bg-white transition-all shadow-xs">
+                  <input
+                    type="text"
+                    placeholder={t('searchPlaceholder')}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="block w-full pl-3.5 pr-2 py-2 leading-5 bg-transparent placeholder-gray-400 text-black focus:outline-none focus:ring-0 sm:text-sm font-medium"
+                  />
+                  {searchQuery && (
                     <button
-                      key={c}
-                      onClick={() => setCurrency(c)}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                        currency === c
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-500 hover:text-gray-700'
-                      }`}
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="px-2 text-gray-400 hover:text-black transition-colors"
+                      title="清除搜尋"
                     >
-                      {c}
+                      <X className="w-4 h-4" />
                     </button>
-                  ))}
-                  {isLoading && (
-                    <div className="absolute -top-1 -right-1 flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gray-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-gray-500"></span>
-                    </div>
                   )}
+                  <button
+                    type="button"
+                    className="flex items-center justify-center px-4 bg-black hover:bg-gray-800 transition-colors"
+                  >
+                    <Search className="h-4 w-4 text-white" />
+                  </button>
+                </div>
+                
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 shrink-0 relative">
+                    {(['TWD', 'USD', 'JPY'] as Currency[]).map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setCurrency(c)}
+                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                          currency === c
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                    {isLoading && (
+                      <div className="absolute -top-1 -right-1 flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gray-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-gray-500"></span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="relative group shrink-0">
+                    <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1.5 cursor-pointer hover:bg-gray-200 transition-colors">
+                      <Globe className="w-4 h-4 text-gray-500" />
+                      <span className="text-xs font-medium text-gray-700 uppercase">{language.split('-')[0]}</span>
+                    </div>
+                    <div className="absolute right-0 mt-2 w-40 bg-white rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 border border-gray-100">
+                      <div className="py-1">
+                        {LANGUAGES.map((lang) => (
+                          <button
+                            key={lang.code}
+                            onClick={() => setLanguage(lang.code)}
+                            className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${
+                              language === lang.code ? 'text-black font-bold' : 'text-gray-700'
+                            }`}
+                          >
+                            {lang.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="relative group shrink-0">
-                  <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1.5 cursor-pointer hover:bg-gray-200 transition-colors">
-                    <Globe className="w-4 h-4 text-gray-500" />
-                    <span className="text-xs font-medium text-gray-700 uppercase">{language.split('-')[0]}</span>
-                  </div>
-                  <div className="absolute right-0 mt-2 w-40 bg-white rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 border border-gray-100">
+                  <button className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors shadow-xs text-xs font-medium">
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>分享</span>
+                  </button>
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 border border-gray-100">
                     <div className="py-1">
-                      {LANGUAGES.map((lang) => (
-                        <button
-                          key={lang.code}
-                          onClick={() => setLanguage(lang.code)}
-                          className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${
-                            language === lang.code ? 'text-black font-bold' : 'text-gray-700'
-                          }`}
-                        >
-                          {lang.label}
-                        </button>
-                      ))}
+                      <button
+                        onClick={() => {
+                          const url = encodeURIComponent(window.location.href);
+                          window.open(`https://line.me/R/msg/text/?${url}`, '_blank');
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                      >
+                        <span className="w-5 h-5 flex items-center justify-center bg-[#00B900] text-white rounded-full text-[10px] font-bold">L</span>
+                        分享至 LINE
+                      </button>
+                      <button
+                        onClick={() => {
+                          const url = encodeURIComponent(window.location.href);
+                          window.open(`https://www.facebook.com/sharer/sharer.php?u=${url}`, '_blank');
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                      >
+                        <Facebook className="w-5 h-5 text-[#1877F2]" />
+                        分享至 Facebook
+                      </button>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(window.location.href);
+                          showToast('已成功複製連結！');
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                      >
+                        <LinkIcon className="w-5 h-5 text-gray-500" />
+                        複製連結
+                      </button>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="relative group shrink-0">
-                <button className="hidden sm:flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors shadow-sm text-sm font-medium">
-                  <Share2 className="w-4 h-4" />
-                  分享
+                {/* Price Alerts List Button */}
+                <button
+                  onClick={() => setIsAlertsListOpen(true)}
+                  className="relative flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors shadow-xs text-xs font-medium shrink-0"
+                  title={t('myPriceAlerts')}
+                  aria-label={t('myPriceAlerts')}
+                >
+                  <Bell className="w-3.5 h-3.5 text-gray-700" />
+                  <span className="hidden lg:inline">{t('priceAlert')}</span>
+                  {totalAlerts > 0 && (
+                    <span className="flex items-center justify-center min-w-4 h-4 px-1 text-[10px] font-bold text-white bg-amber-500 rounded-full animate-pulse">
+                      {totalAlerts}
+                    </span>
+                  )}
                 </button>
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 border border-gray-100">
-                  <div className="py-1">
-                    <button
-                      onClick={() => {
-                        const url = encodeURIComponent(window.location.href);
-                        window.open(`https://line.me/R/msg/text/?${url}`, '_blank');
-                      }}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                    >
-                      <span className="w-5 h-5 flex items-center justify-center bg-[#00B900] text-white rounded-full text-[10px] font-bold">L</span>
-                      分享至 LINE
-                    </button>
-                    <button
-                      onClick={() => {
-                        const url = encodeURIComponent(window.location.href);
-                        window.open(`https://www.facebook.com/sharer/sharer.php?u=${url}`, '_blank');
-                      }}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                    >
-                      <Facebook className="w-5 h-5 text-[#1877F2]" />
-                      分享至 Facebook
-                    </button>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(window.location.href);
-                        showToast('已成功複製連結！');
-                        setIsFilterPanelOpen(false); // also hide if needed, but this is for share dropdown
-                      }}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                    >
-                      <LinkIcon className="w-5 h-5 text-gray-500" />
-                      複製連結
-                    </button>
-                  </div>
-                </div>
+
+                {/* Promotion Kit Button */}
+                <button
+                  onClick={() => setIsPromoModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all shadow-xs text-xs font-bold shrink-0"
+                  title="宣傳推廣與行銷工具箱"
+                >
+                  <Megaphone className="w-3.5 h-3.5 text-white" />
+                  <span>推廣文案包</span>
+                </button>
               </div>
 
-              <button 
-                onClick={() => setIsVideoModalOpen(true)}
-                className="hidden sm:flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-sm hover:bg-gray-800 transition-colors shadow-sm text-sm font-bold uppercase shrink-0"
-              >
-                <Video className="w-4 h-4" />
-                {t('generateVideo')}
-              </button>
+              {/* Hot search tags */}
+              <div className="w-full flex items-center gap-1.5 text-xs overflow-x-auto scrollbar-none">
+                <span className="font-bold text-amber-600 flex items-center gap-1 shrink-0 text-[11px]">
+                  <Flame className="w-3 h-3 fill-current" /> 熱搜:
+                </span>
+                {HOT_SEARCH_TAGS.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setSearchQuery(tag)}
+                    className="px-2 py-0.5 rounded-md bg-gray-100 hover:bg-amber-100 hover:text-amber-900 text-gray-600 transition-colors text-[11px] font-medium shrink-0"
+                  >
+                    #{tag}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Mobile Search Button */}
-            <div className="flex md:hidden items-center gap-2">
+            {/* Mobile Header Buttons */}
+            <div className="flex md:hidden items-center gap-1">
+              <button
+                onClick={() => setIsPromoModalOpen(true)}
+                className="p-2 text-amber-600 hover:text-amber-700 transition-colors"
+                title="推廣文案包"
+                aria-label="推廣文案包"
+              >
+                <Megaphone className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => setIsAlertsListOpen(true)}
+                className="relative p-2 text-gray-800 hover:text-black transition-colors"
+                aria-label={t('myPriceAlerts')}
+              >
+                <Bell className="h-5 w-5" />
+                {totalAlerts > 0 && (
+                  <span className="absolute top-1 right-1 flex items-center justify-center min-w-3.5 h-3.5 px-0.5 text-[9px] font-bold text-white bg-amber-500 rounded-full">
+                    {totalAlerts}
+                  </span>
+                )}
+              </button>
               <button 
                 onClick={() => setIsMobileSearchOpen(true)}
                 className="p-2 text-gray-800 hover:text-black transition-colors"
@@ -348,7 +533,10 @@ export default function App() {
             {CATEGORIES.map((category) => (
               <button
                 key={category}
-                onClick={() => setActiveCategory(category)}
+                onClick={() => {
+                  setActiveCategory(category);
+                  addViewedCategory(category);
+                }}
                 className={`whitespace-nowrap pb-3 text-sm font-bold uppercase tracking-wide transition-all border-b-[3px] ${
                   activeCategory === category
                     ? 'border-black text-black'
@@ -367,6 +555,9 @@ export default function App() {
         
         {/* Horizontal Ad Carousel */}
         <AdCarousel onView={addViewedProduct} />
+
+        {/* Today's Exclusive Coupons & Promo Codes */}
+        <CouponSection onCopySuccess={showToast} />
 
         {/* Coupang Banners */}
         <div className="flex flex-col gap-4 justify-center mb-8 w-full overflow-hidden rounded-lg">
@@ -397,17 +588,85 @@ export default function App() {
           />
         </div>
 
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-          <h2 className="text-lg font-medium text-gray-900">
-            {getCategoryTranslation(activeCategory)} ({filteredAndSortedProducts.length})
-          </h2>
-          <div>
+        {/* Quick Sorting & Header Bar */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3.5 mb-6 pb-4 border-b border-gray-200">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-lg font-black text-gray-900 tracking-wide">
+              {getCategoryTranslation(activeCategory)}
+            </h2>
+            <span className="text-xs font-mono font-bold bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full">
+              {filteredAndSortedProducts.length} 件好物
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Quick Sort Tabs */}
+            <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-gray-200 text-xs shadow-2xs overflow-x-auto scrollbar-none">
+              <button
+                type="button"
+                onClick={() => setSortOption('default')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  sortOption === 'default'
+                    ? 'bg-black text-white shadow-xs'
+                    : 'text-gray-600 hover:text-black hover:bg-gray-100'
+                }`}
+              >
+                預設推薦
+              </button>
+              <button
+                type="button"
+                onClick={() => setSortOption('sales_desc')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1 ${
+                  sortOption === 'sales_desc'
+                    ? 'bg-black text-white shadow-xs'
+                    : 'text-gray-600 hover:text-black hover:bg-gray-100'
+                }`}
+              >
+                <Flame className="w-3.5 h-3.5 text-amber-500 fill-current" />
+                <span>最熱銷</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSortOption('lowest_ever')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1 ${
+                  sortOption === 'lowest_ever'
+                    ? 'bg-black text-white shadow-xs'
+                    : 'text-gray-600 hover:text-black hover:bg-gray-100'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+                <span>歷史新低</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSortOption('discount_desc')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  sortOption === 'discount_desc'
+                    ? 'bg-black text-white shadow-xs'
+                    : 'text-gray-600 hover:text-black hover:bg-gray-100'
+                }`}
+              >
+                最大折扣
+              </button>
+              <button
+                type="button"
+                onClick={() => setSortOption('price_asc')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  sortOption === 'price_asc'
+                    ? 'bg-black text-white shadow-xs'
+                    : 'text-gray-600 hover:text-black hover:bg-gray-100'
+                }`}
+              >
+                價格低到高
+              </button>
+            </div>
+
             <button
               onClick={() => setIsFilterPanelOpen(true)}
-              className="flex items-center gap-2 px-3 py-1.5 text-base border border-gray-300 sm:text-sm rounded-sm shadow-sm bg-white cursor-pointer hover:bg-gray-50 focus:outline-none focus:border-black focus:ring-1 focus:ring-black transition-colors"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold border border-gray-300 rounded-xl bg-white hover:bg-gray-50 text-gray-700 shadow-2xs transition-colors shrink-0"
             >
-              <SlidersHorizontal className="h-4 w-4 text-gray-500" />
-              <span className="font-medium text-gray-700">篩選與排序</span>
+              <SlidersHorizontal className="h-3.5 w-3.5 text-gray-500" />
+              <span>進階篩選</span>
             </button>
           </div>
         </div>
@@ -417,10 +676,33 @@ export default function App() {
           onView={addViewedProduct} 
         />
 
+        {/* When in Price Tracking mode, show Browsing-History Recommended section */}
+        {activeCategory === '降價追蹤' && (
+          <div className="mb-8">
+            <PriceAlertRecommendations
+              onSelectAlertProduct={(p) => {
+                setSelectedAlertProduct(p);
+                setIsAlertModalOpen(true);
+              }}
+              onViewProduct={addViewedProduct}
+              excludeProductIds={filteredAndSortedProducts.map((p) => p.id)}
+              title="降價追蹤推薦 · 根據瀏覽紀錄推薦"
+            />
+          </div>
+        )}
+
         {filteredAndSortedProducts.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {filteredAndSortedProducts.map((product) => (
-              <ProductCard key={product.id} product={product} onView={addViewedProduct} />
+              <ProductCard
+                key={product.id}
+                product={product}
+                onView={addViewedProduct}
+                onOpenPriceAlert={(p) => {
+                  setSelectedAlertProduct(p);
+                  setIsAlertModalOpen(true);
+                }}
+              />
             ))}
           </div>
         ) : (
@@ -496,9 +778,11 @@ export default function App() {
                   <div className="space-y-3">
                     {[
                       { value: 'default', label: t('sortDefault') },
+                      { value: 'sales_desc', label: t('sortSalesDesc') },
+                      { value: 'lowest_ever', label: '歷史新低特惠' },
+                      { value: 'discount_desc', label: '折扣幅度最大' },
                       { value: 'price_asc', label: t('sortPriceAsc') },
-                      { value: 'price_desc', label: t('sortPriceDesc') },
-                      { value: 'sales_desc', label: t('sortSalesDesc') }
+                      { value: 'price_desc', label: t('sortPriceDesc') }
                     ].map((option) => (
                       <label key={option.value} className="flex items-center group cursor-pointer">
                         <div className="relative flex items-center justify-center w-5 h-5 border border-gray-300 rounded-full bg-white peer-checked:border-black peer-checked:bg-black transition-all">
@@ -573,6 +857,46 @@ export default function App() {
       <VideoGeneratorModal 
         isOpen={isVideoModalOpen} 
         onClose={() => setIsVideoModalOpen(false)} 
+      />
+
+      {/* Price Alert Setting Modal */}
+      <PriceAlertModal
+        isOpen={isAlertModalOpen}
+        onClose={() => setIsAlertModalOpen(false)}
+        product={selectedAlertProduct}
+        onAlertSet={showToast}
+      />
+
+      {/* Tracked Price Alerts List Modal */}
+      <PriceAlertsListModal
+        isOpen={isAlertsListOpen}
+        onClose={() => setIsAlertsListOpen(false)}
+        onEditAlert={(p) => {
+          setSelectedAlertProduct(p);
+          setIsAlertModalOpen(true);
+        }}
+        onViewProduct={addViewedProduct}
+      />
+
+      {/* Promotion Kit Modal */}
+      <PromotionKitModal
+        isOpen={isPromoModalOpen}
+        onClose={() => setIsPromoModalOpen(false)}
+        onCopySuccess={showToast}
+      />
+
+      {/* Floating Product Comparison Bar */}
+      <FloatingCompareBar />
+
+      {/* Product Comparison Modal */}
+      <CompareModal
+        isOpen={isCompareModalOpen}
+        onClose={() => setIsCompareModalOpen(false)}
+        onOpenPriceAlert={(p) => {
+          setSelectedAlertProduct(p);
+          setIsAlertModalOpen(true);
+        }}
+        onViewProduct={addViewedProduct}
       />
 
       {/* Toast */}
